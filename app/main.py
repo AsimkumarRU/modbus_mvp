@@ -100,6 +100,38 @@ async def api_read_live(db: AsyncSession = Depends(get_db)):
     return {"timestamp": None, "registers": regs}
 
 
+@app.get("/snapshot")
+async def api_snapshot(db: AsyncSession = Depends(get_db)):
+    """
+    Эндпоинт: GET /snapshot
+    Возвращает последнее значение из базы данных.
+    Аналогичен /read_latest.
+    """
+    latest = await read_latest_snapshot(db)
+    if not latest:
+        raise HTTPException(status_code=404, detail="Нет данных в кеше")
+    return {
+        "timestamp": latest.timestamp,
+        "registers": latest.registers,
+    }
+
+
+@app.post("/poll")
+async def api_poll(db: AsyncSession = Depends(get_db)):
+    """
+    Эндпоинт: POST /poll
+    Выполняет ручной опрос устройства по Modbus и сохраняет результат.
+    """
+    regs = await read_registers()
+    if regs is None:
+        raise HTTPException(status_code=503, detail="Не удалось опросить устройство")
+    snapshot = await create_snapshot(db, regs)
+    return {
+        "timestamp": snapshot.timestamp,
+        "registers": snapshot.registers,
+    }
+
+
 async def modbus_polling_task():
     """
     Фоновая корутина, которая постоянно работает «в фоне».
