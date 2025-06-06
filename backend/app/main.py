@@ -73,6 +73,41 @@ async def api_read_latest(db: AsyncSession = Depends(get_db)):
     }
 
 
+# --- New endpoints -------------------------------------------------------
+
+
+@app.get("/snapshot")
+async def api_snapshot(db: AsyncSession = Depends(get_db)):
+    """
+    Эндпоинт: GET /snapshot
+    Возвращает последнюю сохранённую запись из базы. Если её нет, 404.
+    """
+    latest = await read_latest_snapshot(db)
+    if not latest:
+        raise HTTPException(status_code=404, detail="Нет данных в кеше")
+    return {
+        "timestamp": latest.timestamp,
+        "registers": latest.registers,
+    }
+
+
+@app.post("/poll")
+async def api_poll(db: AsyncSession = Depends(get_db)):
+    """
+    Эндпоинт: POST /poll
+    Выполняет единичный опрос Modbus-устройства и сохраняет результат в базу.
+    Возвращает сохранённые данные. Если опрос не удался — 503.
+    """
+    regs = await read_registers()
+    if regs is None:
+        raise HTTPException(status_code=503, detail="Не удалось опросить устройство")
+    snapshot = await create_snapshot(db, regs)
+    return {
+        "timestamp": snapshot.timestamp,
+        "registers": snapshot.registers,
+    }
+
+
 @app.get("/read_live")
 async def api_read_live(db: AsyncSession = Depends(get_db)):
     """
