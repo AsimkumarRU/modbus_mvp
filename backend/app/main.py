@@ -1,15 +1,23 @@
 # backend/app/main.py
 
 import asyncio
+import logging
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import settings
 from .models import Base
-from .crud import create_snapshot, read_latest_snapshot
+from .crud import create_snapshot, read_latest_snapshot, read_snapshot_history
 from .modbus_client import read_registers, modbus_polling_task
 from .database import engine, async_session
+
+logging.basicConfig(
+    filename=settings.LOG_FILE,
+    level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 # 3. Создаём экземпляр FastAPI
 app = FastAPI()
@@ -33,6 +41,7 @@ async def on_startup():
     2. Запускаем фоновую корутину modbus_polling_task().
     """
     # 1. Создаём таблицы: LatestValues (если их ещё нет)
+    logger.info("Application startup: creating tables and starting polling task")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -40,7 +49,7 @@ async def on_startup():
         try:
             await modbus_polling_task()
         except Exception as e:
-            print(f"Polling task crashed: {e}")
+            logger.error("Polling task crashed: %s", e)
 
     # 2. Запускаем фоновую задачу (без await, чтобы она работала в фоне)
     asyncio.create_task(modbus_polling_task())
@@ -63,6 +72,7 @@ async def api_read_latest(db: AsyncSession = Depends(get_db)):
     Возвращает последнее кешированное значение регистров.
     Если в базе нет ни одной записи, возвращает 404.
     """
+    logger.info("/read_latest called")
     latest = await read_latest_snapshot(db)
     if not latest:
         # Если таблица пуста, возвращаем ошибку 404
@@ -82,6 +92,7 @@ async def api_snapshot(db: AsyncSession = Depends(get_db)):
     Эндпоинт: GET /snapshot
     Возвращает последнюю сохранённую запись из базы. Если её нет, 404.
     """
+    logger.info("/snapshot called")
     latest = await read_latest_snapshot(db)
     if not latest:
         raise HTTPException(status_code=404, detail="Нет данных в кеше")
@@ -91,6 +102,17 @@ async def api_snapshot(db: AsyncSession = Depends(get_db)):
     }
 
 
+@app.get("/history")
+async def api_history(limit: int = 10, db: AsyncSession = Depends(get_db)):
+    """Return last N snapshots from the database."""
+    logger.info("/history called with limit %s", limit)
+    snapshots = await read_snapshot_history(db, limit)
+    return [
+        {"timestamp": s.timestamp, "registers": s.registers}
+        for s in snapshots
+    ]
+
+
 @app.post("/poll")
 async def api_poll(db: AsyncSession = Depends(get_db)):
     """
@@ -98,6 +120,7 @@ async def api_poll(db: AsyncSession = Depends(get_db)):
     Выполняет единичный опрос Modbus-устройства и сохраняет результат в базу.
     Возвращает сохранённые данные. Если опрос не удался — 503.
     """
+    logger.info("/poll called")
     regs = await read_registers()
     if regs is None:
         raise HTTPException(status_code=503, detail="Не удалось опросить устройство")
@@ -117,6 +140,7 @@ async def api_read_live(db: AsyncSession = Depends(get_db)):
     Если и кеша нет — 503 (Service Unavailable).
     """
     # 1. Живой опрос Modbus
+    logger.info("/read_live called")
     regs = await read_registers()
     if regs is None:
         # 2. Если «живой» опрос провалился, пытаемся вернуть кеш
@@ -143,6 +167,7 @@ async def modbus_polling_task():
     - Если получилось, сохраняет их в базу (create_snapshot)
     - Если нет — молча игнорирует и ждёт следующей итерации
     """
+    logger.info("Starting Modbus polling task")
     while True:
         # 1. Попытка «живого» опроса
         regs = await read_registers()
@@ -151,10 +176,12 @@ async def modbus_polling_task():
         if regs is not None:
             async with async_session() as session:
                 await create_snapshot(session, regs)
+            logger.debug("Saved polled registers to database")
 
         # 3. Ждём заданный интервал (например, 5 секунд)
         await asyncio.sleep(settings.POLL_INTERVAL)
 
 @app.get("/")
 async def root():
+    logger.info("root endpoint called")
     return {"message": "FastAPI работает!"}
