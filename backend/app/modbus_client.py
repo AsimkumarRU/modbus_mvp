@@ -9,7 +9,6 @@ from typing import Optional, List
 
 from .crud import create_snapshot
 from .database import get_async_session
-from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def read_registers() -> Optional[List[int]]:
