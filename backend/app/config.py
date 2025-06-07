@@ -27,6 +27,10 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173"
     ]
 
+    # Файл для логов
+    LOG_FILE: str = "app.log"
+    LOG_LEVEL: str = "INFO"
+
 
 # Создаём один экземпляр настроек, чтобы можно было импортировать везде:
 settings = Settings()
