@@ -3,19 +3,13 @@
 import asyncio
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import settings
 from .models import Base
 from .crud import create_snapshot, read_latest_snapshot
 from .modbus_client import read_registers, modbus_polling_task
-
-# 1. Настраиваем SQLAlchemy Async Engine
-engine = create_async_engine(settings.DATABASE_URL, echo=False, future=True)
-
-# 2. Создаём фабрику сессий. class_=AsyncSession говорит: "сессии будут асинхронными"
-async_session = sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+from .database import engine, async_session
 
 # 3. Создаём экземпляр FastAPI
 app = FastAPI()
