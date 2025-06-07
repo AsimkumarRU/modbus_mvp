@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from .config import settings
 from .models import Base
 from .crud import create_snapshot, read_latest_snapshot
-from .modbus_client import read_registers
+from .modbus_client import read_registers, modbus_polling_task
 
 # 1. Настраиваем SQLAlchemy Async Engine
 engine = create_async_engine(settings.DATABASE_URL, echo=False, future=True)
@@ -41,6 +41,12 @@ async def on_startup():
     # 1. Создаём таблицы: LatestValues (если их ещё нет)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    async def safe_polling():
+        try:
+            await modbus_polling_task()
+        except Exception as e:
+            print(f"Polling task crashed: {e}")
 
     # 2. Запускаем фоновую задачу (без await, чтобы она работала в фоне)
     asyncio.create_task(modbus_polling_task())
@@ -154,3 +160,7 @@ async def modbus_polling_task():
 
         # 3. Ждём заданный интервал (например, 5 секунд)
         await asyncio.sleep(settings.POLL_INTERVAL)
+
+@app.get("/")
+async def root():
+    return {"message": "FastAPI работает!"}

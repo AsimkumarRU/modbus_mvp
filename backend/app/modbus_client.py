@@ -7,6 +7,10 @@ from pymodbus.exceptions import ModbusException
 from .config import settings
 from typing import Optional, List
 
+from .crud import create_snapshot
+from .database import get_async_session
+from sqlalchemy.ext.asyncio import AsyncSession
+
 
 async def read_registers() -> Optional[List[int]]:
     """
@@ -37,3 +41,16 @@ async def read_registers() -> Optional[List[int]]:
     finally:
         if client:
             client.close()
+
+async def modbus_polling_task():
+    while True:
+        try:
+            regs = await asyncio.wait_for(read_registers(), timeout=5.0)
+            if regs:
+                async with get_async_session() as session:
+                    await create_snapshot(session, regs)
+        except asyncio.TimeoutError:
+            print("⏱️ Modbus polling timed out")
+        except Exception as e:
+            print(f"⚠️ Polling error: {e}")
+        await asyncio.sleep(5)
